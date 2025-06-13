@@ -5,7 +5,7 @@ import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle }
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
-import { Loader2, AlertCircle, CheckCircle2, ReceiptText } from "lucide-react"
+import { Loader2, AlertCircle, CheckCircle2, ReceiptText, ShieldCheck } from "lucide-react"
 import { parseNote, initPoseidon } from "@/lib/zk-utils"
 import { ZK_CONFIG, CONTRACT_ADDRESSES } from "@/lib/config"
 import { useWalletState } from "@/components/ConnectButton"
@@ -26,6 +26,7 @@ export default function WithdrawPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [isSuccess, setIsSuccess] = useState(false)
   const [noteData, setNoteData] = useState<any>(null)
+  const [proofStatus, setProofStatus] = useState<string>("")
   const { isConnected } = useWalletState()
   
   // Get account and balance using thirdweb hooks
@@ -85,10 +86,34 @@ export default function WithdrawPage() {
     setIsLoading(true)
 
     try {
-      // For simplicity, we'll skip the contract verification steps in this demo
-      // In a real implementation, you would check if the note is already spent
-      // and get the current Merkle root
+      // DEMO: Simulate the ZK proof generation and verification process
+      setProofStatus("Generating zero-knowledge proof...")
       
+      // Simulate proof generation delay
+      await new Promise(resolve => setTimeout(resolve, 3000))
+      setProofStatus("Verifying Merkle proof...")
+      
+      // Simulate Merkle verification delay
+      await new Promise(resolve => setTimeout(resolve, 2000))
+      setProofStatus("Checking nullifier hasn't been spent...")
+      
+      // Simulate nullifier check delay
+      await new Promise(resolve => setTimeout(resolve, 1500))
+      setProofStatus("Processing withdrawal...")
+      
+      // Simulate final processing delay
+      await new Promise(resolve => setTimeout(resolve, 1500))
+      
+      // Complete the withdrawal simulation
+      setIsSuccess(true)
+      toast.success("Withdrawal successful! (Demo Mode)", {
+        description: `${noteData.amount} MNT withdrawn to your wallet.`,
+      })
+      setIsLoading(false)
+      setProofStatus("")
+      
+      // COMMENTED OUT: Actual contract interaction code
+      /*
       // Convert nullifier to bytes32
       const nullifierHex = BigInt(noteData.nullifier).toString(16).padStart(64, '0');
       const nullifierBytes32 = `0x${nullifierHex}` as `0x${string}`;
@@ -140,12 +165,14 @@ export default function WithdrawPage() {
           setIsLoading(false);
         },
       });
+      */
     } catch (error: any) {
       toast.error("Preparation failed", {
         description: error.message || "There was an error preparing your withdrawal",
       });
       console.error("Error preparing withdrawal:", error);
       setIsLoading(false);
+      setProofStatus("");
     }
   }
 
@@ -164,6 +191,14 @@ export default function WithdrawPage() {
         </CardHeader>
           
           <CardContent className="px-6 space-y-4">
+            {/* Demo Mode Banner */}
+            <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+              <ShieldCheck className="h-4 w-4 text-blue-600" />
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                DEMO MODE: No actual blockchain transactions will occur
+              </p>
+            </div>
+            
             {!isConnected && (
               <div className="flex items-center gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
                 <AlertCircle className="h-4 w-4 text-yellow-600" />
@@ -211,6 +246,16 @@ export default function WithdrawPage() {
                     <span>Balance: {isBalanceLoading ? "Loading..." : `${parseFloat(formattedBalance).toFixed(4)} ${balance?.symbol || "MNT"}`}</span>
             </div>
           )}
+                
+                {/* ZK Proof Status Display */}
+                {isLoading && proofStatus && (
+                  <div className="flex items-center gap-2 p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-200 dark:border-indigo-800 rounded-md">
+                    <Loader2 className="h-4 w-4 text-indigo-600 animate-spin" />
+                    <p className="text-sm text-indigo-800 dark:text-indigo-200">
+                      {proofStatus}
+                    </p>
+                  </div>
+                )}
                 
                 <div className="pt-4">
             <Button

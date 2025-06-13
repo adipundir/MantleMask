@@ -61,6 +61,17 @@ export default function DepositPage() {
       // Generate a note with nullifier and secret
       const note = await generateNote(amount);
       
+      // DEMO: Simulate transaction processing with a delay
+      setTimeout(() => {
+        setSecretNote(note.noteString);
+        toast.success("Deposit successful! (Demo Mode)", {
+          description: `${amount} MNT deposited. Save your note to withdraw later!`,
+        });
+        setIsLoading(false);
+      }, 2000);
+      
+      // COMMENTED OUT: Actual contract interaction code
+      /*
       // Convert the commitment to bytes32 format
       const commitmentHex = BigInt(note.commitment).toString(16).padStart(64, '0');
       const commitmentBytes32 = `0x${commitmentHex}`;
@@ -97,6 +108,7 @@ export default function DepositPage() {
           setIsLoading(false);
         },
       });
+      */
     } catch (error: any) {
       toast.error("Preparation failed", {
         description: error.message || "There was an error preparing your deposit",
@@ -131,6 +143,14 @@ export default function DepositPage() {
         </CardHeader>
           
           <CardContent className="px-6 space-y-4">
+            {/* Demo Mode Banner */}
+            <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
+              <ShieldCheck className="h-4 w-4 text-blue-600" />
+              <p className="text-sm text-blue-800 dark:text-blue-200">
+                DEMO MODE: No actual blockchain transactions will occur
+              </p>
+            </div>
+            
             {!isConnected && (
             <div className="flex items-center gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
               <AlertCircle className="h-4 w-4 text-yellow-600" />
@@ -157,22 +177,13 @@ export default function DepositPage() {
                       key={denomination}
                       variant={amount === denomination ? "default" : "outline"}
                       onClick={() => setAmount(denomination)}
-                      disabled={isLoading || !!secretNote || Number(denomination) > Number(formattedBalance)}
+                      disabled={isLoading || !!secretNote}
                       className="h-12"
                     >
                       {denomination} MNT
                     </Button>
                   ))}
           </div>
-
-                {Number(amount) > Number(formattedBalance) && (
-                  <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-                    <AlertCircle className="h-4 w-4 text-red-600" />
-                    <p className="text-sm text-red-800 dark:text-red-200">
-                      Insufficient balance
-                    </p>
-                  </div>
-                )}
               </div>
             )}
 
@@ -211,7 +222,7 @@ export default function DepositPage() {
                 <Button
                   className="w-full" 
                   onClick={handleDeposit}
-                  disabled={isLoading || !isConnected || Number(amount) > Number(formattedBalance)}
+                  disabled={isLoading || !isConnected}
                 >
               {isLoading ? (
                 <>
