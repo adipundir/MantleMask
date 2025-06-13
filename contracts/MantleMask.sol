@@ -3,8 +3,7 @@ pragma solidity ^0.8.20;
 
 import "@openzeppelin/contracts/security/ReentrancyGuard.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
-import "./interfaces/IMerkleTreeWithHistory.sol";
-import "./MerkleTreeWithHistory.sol";
+import "./libraries/PoseidonT3.sol";
 
 /**
  * @title MantleMask
@@ -16,8 +15,24 @@ contract MantleMask is ReentrancyGuard, Ownable {
     event Deposit(bytes32 indexed commitment, uint256 denomination, uint256 leafIndex, uint256 timestamp);
     event Withdrawal(address to, bytes32 nullifierHash, address indexed relayer, uint256 fee, uint256 denomination);
     
-    // State variables
-    IMerkleTreeWithHistory public merkleTree;
+    // Merkle Tree constants and variables
+    uint32 public constant MERKLE_TREE_HISTORY_SIZE = 100;
+    uint32 public immutable levels;
+    
+    // Zero values for each level in the tree
+    bytes32[] public zeros;
+    
+    // Current index in the tree (number of inserted leaves)
+    uint32 public currentRootIndex;
+    
+    // Current leaf insertion index
+    uint32 public nextLeafIndex;
+    
+    // Filled subtrees
+    bytes32[] public filledSubtrees;
+    
+    // Historical roots
+    bytes32[MERKLE_TREE_HISTORY_SIZE] public roots;
     
     // Mapping to track spent nullifiers (prevents double-spending)
     mapping(bytes32 => bool) public nullifierHashes;
@@ -44,11 +59,25 @@ contract MantleMask is ReentrancyGuard, Ownable {
         address _verifier
     ) Ownable(msg.sender) {
         require(_verifier != address(0), "Verifier address cannot be zero");
+        require(_merkleTreeHeight > 0, "Merkle tree height should be greater than 0");
+        require(_merkleTreeHeight <= 32, "Merkle tree height should be less than or equal to 32");
         
         verifier = _verifier;
+        levels = _merkleTreeHeight;
         
         // Initialize the Merkle tree
-        merkleTree = new MerkleTreeWithHistory(_merkleTreeHeight);
+        bytes32 currentZero = bytes32(0);
+        zeros.push(currentZero);
+        filledSubtrees.push(currentZero);
+        
+        for (uint32 i = 1; i < _merkleTreeHeight; i++) {
+            currentZero = hashLeftRight(currentZero, currentZero);
+            zeros.push(currentZero);
+            filledSubtrees.push(currentZero);
+        }
+        
+        // Initialize the first root
+        roots[0] = hashLeftRight(currentZero, currentZero);
         
         // Set allowed denominations (in MNT - 10, 100, 500, 1000)
         allowedDenominations = [
@@ -65,6 +94,55 @@ contract MantleMask is ReentrancyGuard, Ownable {
     }
     
     /**
+     * @dev Hash two child nodes to get parent node using Poseidon hash
+     * @param _left Left child
+     * @param _right Right child
+     * @return Parent node hash
+     */
+    function hashLeftRight(bytes32 _left, bytes32 _right) public pure returns (bytes32) {
+        return bytes32(PoseidonT3.poseidon([uint256(uint256(_left)), uint256(uint256(_right))]));
+    }
+    
+    /**
+     * @dev Insert a new leaf into the Merkle tree
+     * @param _leaf Leaf to insert
+     * @return Index of the inserted leaf
+     */
+    function _insert(bytes32 _leaf) internal returns (uint256) {
+        uint32 currentIndex = nextLeafIndex;
+        require(currentIndex != uint32(2)**levels, "Merkle tree is full");
+        
+        uint32 currentLevelIndex = currentIndex;
+        bytes32 currentLevelHash = _leaf;
+        bytes32 left;
+        bytes32 right;
+        
+        // Update the tree
+        for (uint32 i = 0; i < levels; i++) {
+            if (currentLevelIndex % 2 == 0) {
+                // If current index is even, update the filled subtree at this level
+                left = currentLevelHash;
+                right = zeros[i];
+                filledSubtrees[i] = currentLevelHash;
+            } else {
+                // If current index is odd, hash with the filled subtree
+                left = filledSubtrees[i];
+                right = currentLevelHash;
+            }
+            
+            currentLevelHash = hashLeftRight(left, right);
+            currentLevelIndex /= 2;
+        }
+        
+        // Update the root history
+        currentRootIndex = (currentRootIndex + 1) % MERKLE_TREE_HISTORY_SIZE;
+        roots[currentRootIndex] = currentLevelHash;
+        nextLeafIndex = currentIndex + 1;
+        
+        return currentIndex;
+    }
+    
+    /**
      * @dev Deposit function - user deposits native MNT and adds commitment to Merkle tree
      * @param _commitment The commitment hash (derived from nullifier and secret)
      * Note: The commitment is a Poseidon hash of (nullifier, secret) generated client-side
@@ -74,7 +152,7 @@ contract MantleMask is ReentrancyGuard, Ownable {
         require(isDenominationAllowed[msg.value], "Deposit amount must be exactly 10, 100, 500, or 1000 MNT");
         
         // Insert the commitment into the Merkle tree
-        uint256 leafIndex = merkleTree.insert(_commitment);
+        uint256 leafIndex = _insert(_commitment);
         
         // Map commitment to denomination for later verification
         nullifierToDenomination[_commitment] = msg.value;
@@ -104,7 +182,7 @@ contract MantleMask is ReentrancyGuard, Ownable {
         require(isDenominationAllowed[_denomination], "Invalid denomination");
         require(_fee <= _denomination, "Fee exceeds denomination");
         require(!nullifierHashes[_nullifierHash], "Note has been already spent");
-        require(merkleTree.isKnownRoot(_root), "Invalid Merkle root");
+        require(isKnownRoot(_root), "Invalid Merkle root");
         require(_recipient != address(0), "Cannot withdraw to zero address");
         
         // Verify that _root is one of the last MERKLE_TREE_HISTORY_SIZE roots
@@ -170,7 +248,7 @@ contract MantleMask is ReentrancyGuard, Ownable {
      * @return Current root hash
      */
     function getLastRoot() external view returns (bytes32) {
-        return merkleTree.getLastRoot();
+        return roots[currentRootIndex];
     }
     
     /**
@@ -178,8 +256,25 @@ contract MantleMask is ReentrancyGuard, Ownable {
      * @param _root Root to check
      * @return True if the root exists
      */
-    function isKnownRoot(bytes32 _root) external view returns (bool) {
-        return merkleTree.isKnownRoot(_root);
+    function isKnownRoot(bytes32 _root) public view returns (bool) {
+        if (_root == 0) {
+            return false;
+        }
+        
+        // Check if _root is one of the historical roots
+        uint32 i = currentRootIndex;
+        do {
+            if (_root == roots[i]) {
+                return true;
+            }
+            
+            if (i == 0) {
+                i = MERKLE_TREE_HISTORY_SIZE;
+            }
+            i--;
+        } while (i != currentRootIndex);
+        
+        return false;
     }
     
     /**

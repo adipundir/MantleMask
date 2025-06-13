@@ -1,6 +1,60 @@
 # MantleMask
 
-MantleMask is a privacy-focused application built on the Mantle Network that enables anonymous token transfers using zero-knowledge proofs. It allows users to make deposits and withdrawals without revealing the connection between their addresses.
+MantleMask is a privacy-focused application for anonymous transfers of native MNT on the Mantle Network. It uses zero-knowledge proofs and Merkle trees to ensure transaction privacy.
+
+## Overview
+
+MantleMask allows users to:
+
+1. **Deposit** native MNT into the privacy pool
+2. **Withdraw** MNT to any address without revealing the connection between deposit and withdrawal
+3. **Maintain privacy** through zero-knowledge proofs
+
+## How It Works
+
+1. **Deposit**: A user deposits a fixed denomination of MNT (10, 100, 500, or 1000 MNT) along with a commitment hash.
+2. **Note Generation**: The user receives a "note" (nullifier + secret) that proves ownership of the deposit.
+3. **Merkle Tree**: The commitment is added to a Merkle tree.
+4. **Withdrawal**: Later, the user can withdraw by providing a zero-knowledge proof that they know a note corresponding to a commitment in the tree, without revealing which one.
+
+## Architecture
+
+The system consists of two main components:
+
+### Smart Contracts
+
+1. **MantleMask.sol**: The main contract that handles deposits and withdrawals of native MNT. This contract includes the Merkle tree implementation for storing commitments.
+
+2. **Verifier.sol**: A contract that verifies zero-knowledge proofs for private withdrawals.
+
+3. **PoseidonT3.sol**: A library that implements the Poseidon hash function, which is efficient for ZK circuits.
+
+### Frontend (Not Included in This Repository)
+
+The frontend application would:
+
+1. Generate commitment hashes and notes
+2. Create zero-knowledge proofs for withdrawals
+3. Provide a user interface for deposits and withdrawals
+
+We've included a simple `frontend-example.js` file that demonstrates how to interact with the MantleMask contracts from a JavaScript application using ethers.js and circomlibjs.
+
+## Deployment
+
+See [Deployment Instructions](./contracts/DeploymentInstructions.md) for detailed steps on how to deploy the contracts to the Mantle Network.
+
+## Security Considerations
+
+Before deploying to production, ensure:
+
+1. A proper ZK circuit is implemented and tested
+2. The Verifier contract is generated from this circuit
+3. The Poseidon hash implementation is secure and efficient
+4. The contracts have been professionally audited
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Features
 
@@ -72,31 +126,6 @@ yarn dev
 1. Follow the instructions in `contracts/DeploymentInstructions.md` to deploy the contracts using Remix IDE.
 2. Once deployed, update the contract addresses in `app/lib/config.ts`.
 
-## How It Works
-
-### Deposit Flow
-
-1. Connect your wallet
-2. Enter the amount you want to deposit
-3. Click "Deposit Privately"
-4. The app generates a cryptographic note using zero-knowledge primitives
-5. Save this note securely - you'll need it to withdraw funds
-
-### Withdrawal Flow
-
-1. Connect your wallet
-2. Enter the secret note from your deposit
-3. Click "Withdraw Tokens"
-4. The app verifies the note's validity using ZK verification
-5. Funds are transferred to your wallet anonymously
-
-## Security Considerations
-
-- **Note Security**: The secret note is the only way to recover your funds. Keep it secure.
-- **Zero-Knowledge**: The application uses industry-standard cryptographic primitives (Poseidon hash) for commitment generation.
-- **Browser Security**: All cryptographic operations happen client-side. Your keys never leave your browser.
-- **Smart Contracts**: The contracts implement a Merkle tree for privacy and include safeguards against double-spending.
-
 ## Project Structure
 
 ```
@@ -121,10 +150,6 @@ mantlemask/
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
 
