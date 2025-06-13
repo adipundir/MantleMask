@@ -3,12 +3,12 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { ThemeToggle } from "@/components/theme-toggle"
-import { DynamicWidget } from "@dynamic-labs/sdk-react-core"
 import { ShieldCheck } from "lucide-react"
+import ConnectBtn, { useWalletState } from "@/components/ConnectButton"
 
 export function Navbar() {
   const pathname = usePathname()
-  
+  const { isConnected } = useWalletState()
   const isActive = (path: string) => {
     return pathname === path
   }
@@ -44,9 +44,11 @@ export function Navbar() {
           </Link>
         </nav>
         
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-4">
           <ThemeToggle />
-          <DynamicWidget />
+          <div className="scale-90">
+            <ConnectBtn/>
+          </div>
         </div>
       </div>
     </header>

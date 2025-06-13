@@ -79,11 +79,15 @@ export async function getAllowedDenominations(dynamicContext: ReturnType<typeof 
 
 /**
  * Make a deposit to the MantleMask contract
- * @param dynamicContext The Dynamic context from useDynamicContext()
+ * @param account The thirdweb account
  * @param amount Amount to deposit in MNT
  * @returns The generated note and transaction hash
  */
-export async function makeDeposit(dynamicContext: ReturnType<typeof useDynamicContext>, amount: string) {
+export async function makeDeposit(account: any, amount: string) {
+  if (!account) {
+    throw new Error("No wallet connected");
+  }
+
   // Generate a note with nullifier and secret
   const note = await generateNote(amount);
   
@@ -91,18 +95,32 @@ export async function makeDeposit(dynamicContext: ReturnType<typeof useDynamicCo
   const commitmentHex = BigInt(note.commitment).toString(16).padStart(64, '0');
   const commitmentBytes32 = `0x${commitmentHex}`;
   
-  // Convert amount to wei (with 18 decimals)
-  const amountInWei = ethers.parseEther(amount);
-  
-  // Make the deposit with native MNT
-  const mantleMaskContract = await getMantleMaskContract(dynamicContext);
-  const tx = await mantleMaskContract.deposit(commitmentBytes32, { value: amountInWei });
-  await tx.wait();
-  
-  return {
-    note: note.noteString,
-    txHash: tx.hash
-  };
+  try {
+    // Create the transaction data for the deposit function
+    const iface = new ethers.Interface(MANTLEMASK_ABI);
+    const data = iface.encodeFunctionData("deposit", [commitmentBytes32]);
+    
+    // Convert amount to wei (with 18 decimals)
+    const amountInWei = ethers.parseEther(amount);
+    
+    // Get the wallet client from the account
+    const walletClient = await account.getWalletClient();
+    
+    // Send the transaction using the thirdweb wallet
+    const hash = await walletClient.sendTransaction({
+      to: CONTRACT_ADDRESSES.mantleMask,
+      value: BigInt(amountInWei.toString()),
+      data: data,
+    });
+    
+    return {
+      note: note.noteString,
+      txHash: hash
+    };
+  } catch (error) {
+    console.error("Error making deposit:", error);
+    throw error;
+  }
 }
 
 /**

@@ -4,7 +4,9 @@ import "./globals.css";
 import { ThemeProvider } from "@/components/theme-provider";
 import { Navbar } from "@/components/navbar";
 import { Toaster } from "sonner";
-import DynamicProvider from "@/components/providers";
+import { ThirdwebProvider } from "thirdweb/react";
+import { createThirdwebClient } from "thirdweb";
+
 
 const inter = Inter({ subsets: ["latin"] });
 
@@ -12,6 +14,10 @@ export const metadata: Metadata = {
   title: "MantleMask - Privacy-First Token Transfers",
   description: "Transfer your MNT tokens with complete privacy using zero-knowledge proofs",
 };
+
+const client = createThirdwebClient({
+  clientId: process.env.NEXT_PUBLIC_THIRDWEB_CLIENT_ID!,
+});
 
 export default function RootLayout({
   children,
@@ -27,13 +33,13 @@ export default function RootLayout({
           enableSystem
           disableTransitionOnChange
         >
-         <DynamicProvider>
+          <ThirdwebProvider>
             <div className="relative flex min-h-screen flex-col">
               <Navbar />
               <div className="flex-1">{children}</div>
             </div>
             <Toaster richColors position="top-center" />
-          </DynamicProvider>
+            </ThirdwebProvider>
         </ThemeProvider>
       </body>
     </html>

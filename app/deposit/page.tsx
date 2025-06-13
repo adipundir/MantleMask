@@ -2,24 +2,37 @@
 
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
-import { useDynamicContext } from "@dynamic-labs/sdk-react-core"
-import { useIsLoggedIn } from "@dynamic-labs/sdk-react-core"
 import { toast } from "sonner"
 import { Loader2, Copy, CheckCircle2, AlertCircle, ShieldCheck } from "lucide-react"
-import { initPoseidon } from "@/lib/zk-utils"
-import { makeDeposit, getNativeBalance, getAllowedDenominations } from "@/lib/contract-utils"
-import { ZK_CONFIG } from "@/lib/config"
+import { initPoseidon, generateNote } from "@/lib/zk-utils"
+import { ZK_CONFIG, CONTRACT_ADDRESSES } from "@/lib/config"
+import { useWalletState } from "@/components/ConnectButton"
+import { useActiveAccount, useWalletBalance, useSendTransaction } from "thirdweb/react"
+import { client, mantleSepolia } from "@/components/ConnectButton"
+import { getContract, prepareContractCall } from "thirdweb"
+import { ethers } from "ethers"
+
+// Contract ABI for the deposit function
+const MANTLEMASK_ABI = ["function deposit(bytes32 commitment) external payable"]
 
 export default function DepositPage() {
   const [amount, setAmount] = useState(ZK_CONFIG.allowedDenominations[0])
   const [isLoading, setIsLoading] = useState(false)
   const [secretNote, setSecretNote] = useState("")
   const [copied, setCopied] = useState(false)
-  const [balance, setBalance] = useState("0.0")
-  const dynamicContext = useDynamicContext()
-  const isLoggedIn = useIsLoggedIn()
+  const { isConnected } = useWalletState()
+  
+  // Get account and balance using thirdweb hooks
+  const account = useActiveAccount()
+  const { data: balance, isLoading: isBalanceLoading } = useWalletBalance({
+    client,
+    chain: mantleSepolia,
+    address: account?.address,
+  })
+
+  // Use thirdweb's transaction hook
+  const { mutate: sendTransaction } = useSendTransaction()
   
   // Initialize Poseidon when component mounts
   useEffect(() => {
@@ -34,27 +47,8 @@ export default function DepositPage() {
     init();
   }, []);
   
-  const getBalances = async () => {
-    if (dynamicContext.primaryWallet?.address) {
-      try {
-        const balance = await getNativeBalance(dynamicContext, dynamicContext.primaryWallet.address);
-        setBalance(balance);
-      } catch (error) {
-        console.error("Error fetching balance:", error);
-        setBalance("0.0");
-      }
-    }
-  }
-  
-  useEffect(() => {
-    console.log("Useeffect running")
-    if (dynamicContext.primaryWallet?.address) {
-      getBalances();
-    }
-  }, [dynamicContext])
-
   const handleDeposit = async () => {
-    if (!isLoggedIn || !dynamicContext.primaryWallet?.address) {
+    if (!isConnected || !account) {
       toast.error("Wallet not connected", {
         description: "Please connect your wallet to deposit tokens",
       })
@@ -64,37 +58,51 @@ export default function DepositPage() {
     setIsLoading(true)
 
     try {
-      // Ensure we're on the Mantle network
-      try {
-        // Removed switchToMantleNetwork call as it's not defined
-        // await switchToMantleNetwork(dynamicContext);
-      } catch (networkError: any) {
-        toast.error("Network Error", {
-          description: networkError.message || "Failed to switch to Mantle network",
-        });
-        setIsLoading(false);
-        return;
-      }
+      // Generate a note with nullifier and secret
+      const note = await generateNote(amount);
       
-      // Make the deposit using contract-utils
-      const result = await makeDeposit(dynamicContext, amount);
+      // Convert the commitment to bytes32 format
+      const commitmentHex = BigInt(note.commitment).toString(16).padStart(64, '0');
+      const commitmentBytes32 = `0x${commitmentHex}`;
       
-      setSecretNote(result.note)
+      // Create a contract instance with thirdweb
+      const contract = getContract({
+        client,
+        address: CONTRACT_ADDRESSES.mantleMask,
+        chain: mantleSepolia,
+      });
       
-      toast.success("Deposit successful!", {
-        description: `${amount} MNT deposited. Save your note to withdraw later!`,
-      })
+      // Prepare the transaction
+      const transaction = prepareContractCall({
+        contract,
+        method: "function deposit(bytes32 commitment) external payable",
+        params: [commitmentBytes32 as `0x${string}`],
+        value: BigInt(ethers.parseEther(amount).toString()),
+      });
       
-      // Update balance after successful deposit
-      const newBalance = await getNativeBalance(dynamicContext, dynamicContext.primaryWallet.address);
-      setBalance(newBalance);
+      // Send the transaction
+      sendTransaction(transaction, {
+        onSuccess: (result) => {
+          setSecretNote(note.noteString);
+          toast.success("Deposit successful!", {
+            description: `${amount} MNT deposited. Save your note to withdraw later!`,
+          });
+          setIsLoading(false);
+        },
+        onError: (error) => {
+          toast.error("Deposit failed", {
+            description: error.message || "There was an error processing your deposit",
+          });
+          console.error("Error depositing:", error);
+          setIsLoading(false);
+        },
+      });
     } catch (error: any) {
-      toast.error("Deposit failed", {
-        description: error.message || "There was an error processing your deposit",
-      })
-      console.error("Error depositing:", error)
-    } finally {
-      setIsLoading(false)
+      toast.error("Preparation failed", {
+        description: error.message || "There was an error preparing your deposit",
+      });
+      console.error("Error preparing deposit:", error);
+      setIsLoading(false);
     }
   }
 
@@ -108,6 +116,9 @@ export default function DepositPage() {
       })
   }
 
+  // Format balance for display
+  const formattedBalance = balance ? balance.displayValue : "0.0"
+
   return (
     <div className="container px-4 py-12 md:px-6 md:py-16 lg:px-8">
       <div className="mx-auto flex max-w-md flex-col items-center justify-center gap-4">
@@ -120,7 +131,7 @@ export default function DepositPage() {
         </CardHeader>
           
           <CardContent className="px-6 space-y-4">
-            {!isLoggedIn && (
+            {!isConnected && (
             <div className="flex items-center gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
               <AlertCircle className="h-4 w-4 text-yellow-600" />
               <p className="text-sm text-yellow-800 dark:text-yellow-200">
@@ -129,14 +140,14 @@ export default function DepositPage() {
             </div>
           )}
 
-            {isLoggedIn && (
+            {isConnected && (
           <div className="space-y-2">
                 <div className="flex justify-between items-center">
                   <label className="text-sm font-medium">
                     Amount to Deposit
             </label>
                   <span className="text-sm text-muted-foreground">
-                    Balance: {parseFloat(balance).toFixed(4)} MNT
+                    Balance: {isBalanceLoading ? "Loading..." : `${parseFloat(formattedBalance).toFixed(4)} ${balance?.symbol || "MNT"}`}
                   </span>
                 </div>
                 
@@ -146,7 +157,7 @@ export default function DepositPage() {
                       key={denomination}
                       variant={amount === denomination ? "default" : "outline"}
                       onClick={() => setAmount(denomination)}
-                      disabled={isLoading || !!secretNote || Number(denomination) > Number(balance)}
+                      disabled={isLoading || !!secretNote || Number(denomination) > Number(formattedBalance)}
                       className="h-12"
                     >
                       {denomination} MNT
@@ -154,7 +165,7 @@ export default function DepositPage() {
                   ))}
           </div>
 
-                {Number(amount) > Number(balance) && (
+                {Number(amount) > Number(formattedBalance) && (
                   <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
                     <AlertCircle className="h-4 w-4 text-red-600" />
                     <p className="text-sm text-red-800 dark:text-red-200">
@@ -200,7 +211,7 @@ export default function DepositPage() {
                 <Button
                   className="w-full" 
                   onClick={handleDeposit}
-                  disabled={isLoading || !isLoggedIn || Number(amount) > Number(balance)}
+                  disabled={isLoading || !isConnected || Number(amount) > Number(formattedBalance)}
                 >
               {isLoading ? (
                 <>
