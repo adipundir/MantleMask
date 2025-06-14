@@ -25,8 +25,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
-      <body className={inter.className}>
+    <html lang="en" suppressHydrationWarning className="h-full">
+      <body className={`${inter.className} h-full overflow-auto`}>
         <ThemeProvider
           attribute="class"
           defaultTheme="system"
@@ -34,9 +34,9 @@ export default function RootLayout({
           disableTransitionOnChange
         >
           <ThirdwebProvider>
-            <div className="relative flex min-h-screen flex-col">
+            <div className="relative flex min-h-screen flex-col h-full">
               <Navbar />
-              <div className="flex-1">{children}</div>
+              <div className="flex-1 overflow-auto">{children}</div>
             </div>
             <Toaster richColors position="top-center" />
             </ThirdwebProvider>

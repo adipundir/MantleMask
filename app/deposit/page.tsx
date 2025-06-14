@@ -132,8 +132,8 @@ export default function DepositPage() {
   const formattedBalance = balance ? balance.displayValue : "0.0"
 
   return (
-    <div className="container px-4 py-12 md:px-6 md:py-16 lg:px-8">
-      <div className="mx-auto flex max-w-md flex-col items-center justify-center gap-4">
+    <div className="container px-4 py-12 md:px-6 md:py-16 lg:px-8 h-full overflow-y-auto">
+      <div className="mx-auto flex max-w-md flex-col items-center justify-center gap-4 pb-8">
         <Card className="w-full shadow-lg">
           <CardHeader className="text-center">
             <CardTitle className="text-2xl font-bold">Deposit MNT</CardTitle>

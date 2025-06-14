@@ -120,7 +120,7 @@
     @apply bg-background text-foreground;
   }
   html, body {
-    @apply h-full overflow-hidden;
+    @apply h-full;
   }
   .container {
     @apply mx-auto w-full max-w-[1400px];
