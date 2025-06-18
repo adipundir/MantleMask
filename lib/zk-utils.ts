@@ -69,6 +69,7 @@ interface NoteComponents {
   commitment: Commitment;
   amount: Amount;
   noteString: Note;
+  nullifierHash?: string;
 }
 
 /**
@@ -90,7 +91,7 @@ function simulatePoseidonHash(inputs: BigInt[]): string {
  * Generate a note with proper cryptographic commitments
  * This is the core function for creating ZK deposit notes
  */
-export async function generateNote(amount: string): Promise<NoteComponents> {
+export async function generateNote(amount: string): Promise<NoteComponents & { commitmentHex: string }> {
   try {
     // Try to initialize Poseidon if not already initialized
     if (!poseidonHasher) {
@@ -106,23 +107,31 @@ export async function generateNote(amount: string): Promise<NoteComponents> {
     const secret = secretBigInt.toString();
     
     let commitment: string;
+    let commitmentHex: string;
     
     // Use Poseidon to hash the nullifier and secret to create the commitment
     if (poseidonHasher) {
       const hash = poseidonHasher([nullifierBigInt, secretBigInt]);
       commitment = poseidonHasher.F.toString(hash);
+      commitmentHex = toBytes32(commitment);
     } else {
       // Fallback if Poseidon isn't available
       commitment = simulatePoseidonHash([nullifierBigInt, secretBigInt]);
+      commitmentHex = toBytes32(commitment);
     }
     
     // Create the note string
     const noteString = `mantle_${amount}_${nullifier}_${secret}`;
     
+    // Calculate nullifier hash
+    const nullifierHash = calculateNullifierHash(nullifier, secret);
+    
     return {
       nullifier,
       secret,
       commitment,
+      commitmentHex,
+      nullifierHash,
       amount,
       noteString
     };
@@ -135,7 +144,7 @@ export async function generateNote(amount: string): Promise<NoteComponents> {
 /**
  * Parse a note string back into its components
  */
-export function parseNote(noteString: string): NoteComponents | null {
+export function parseNote(noteString: string): (NoteComponents & { commitmentHex: string, nullifierHash: string }) | null {
   try {
     const match = noteString.match(/mantle_(\d+\.?\d*)_(\d+)_(\d+)/);
     if (!match) return null;
@@ -155,16 +164,72 @@ export function parseNote(noteString: string): NoteComponents | null {
       commitment = simulatePoseidonHash([nullifierBigInt, secretBigInt]);
     }
     
+    // Calculate nullifier hash
+    const nullifierHash = calculateNullifierHash(nullifier, secret);
+    
     return {
       nullifier,
       secret,
       commitment,
+      commitmentHex: toBytes32(commitment),
+      nullifierHash,
       amount,
       noteString
     };
   } catch (error) {
     console.error("Error parsing note:", error);
     return null;
+  }
+}
+
+/**
+ * Calculate the nullifier hash from nullifier and secret
+ * This is used to prevent double-spending without revealing the original deposit
+ */
+export function calculateNullifierHash(nullifier: string, secret: string): string {
+  try {
+    const nullifierBigInt = BigInt(nullifier);
+    
+    // In a real implementation, this would use a different Poseidon hash instance
+    // to prevent linking the nullifier hash to the commitment
+    if (poseidonHasher) {
+      const hash = poseidonHasher([nullifierBigInt]);
+      return poseidonHasher.F.toString(hash);
+    } else {
+      return simulatePoseidonHash([nullifierBigInt]);
+    }
+  } catch (error) {
+    console.error("Error calculating nullifier hash:", error);
+    return "0";
+  }
+}
+
+/**
+ * Convert a decimal string to bytes32 hex format
+ * This is used for Ethereum contract interactions
+ */
+export function toBytes32(value: string): string {
+  try {
+    // Handle poseidon hash output format
+    if (value.startsWith('poseidon_')) {
+      // Create a deterministic hex from the poseidon simulation
+      const parts = value.split('_');
+      const hashPart = parts[1] || '0';
+      const timePart = parts[2] || '0';
+      
+      // Create a hex string from the hash parts
+      const hexValue = (BigInt(hashPart) ^ BigInt(timePart)).toString(16).padStart(64, '0');
+      return `0x${hexValue}`;
+    }
+    
+    // Handle normal BigInt values
+    const bigIntValue = BigInt(value);
+    const hexValue = bigIntValue.toString(16).padStart(64, '0');
+    return `0x${hexValue}`;
+  } catch (error) {
+    console.error("Error converting to bytes32:", error);
+    // Return a zero bytes32 value as fallback
+    return "0x" + "0".repeat(64);
   }
 }
 

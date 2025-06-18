@@ -1,17 +1,18 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.20;
 
-import "./interfaces/IMerkleTreeWithHistory.sol";
 import "./libraries/PoseidonT3.sol";
 
 /**
  * @title MerkleTreeWithHistory
- * @dev Implements a Merkle tree with historical roots for ZK proofs
- * Uses Poseidon hash function which is efficient for ZK circuits
+ * @dev Implements an incremental Merkle tree with history
+ * This is a separate contract to handle the Merkle tree logic
+ * Inspired by Tornado Cash's implementation
  */
-contract MerkleTreeWithHistory is IMerkleTreeWithHistory {
-    // Number of historical roots to keep
-    uint32 public constant MERKLE_TREE_HISTORY_SIZE = 100;
+contract MerkleTreeWithHistory {
+    // Merkle Tree constants and variables
+    uint32 public constant ROOT_HISTORY_SIZE = 100;
+    uint32 public immutable levels;
     
     // Zero values for each level in the tree
     bytes32[] public zeros;
@@ -23,37 +24,32 @@ contract MerkleTreeWithHistory is IMerkleTreeWithHistory {
     uint32 public nextLeafIndex;
     
     // Filled subtrees
-    bytes32[] public filledSubtrees;
+    mapping(uint256 => bytes32) public filledSubtrees;
     
     // Historical roots
-    bytes32[MERKLE_TREE_HISTORY_SIZE] public roots;
-    
-    // Tree height
-    uint32 public immutable levels;
+    mapping(uint256 => bytes32) public roots;
 
+    // Commitments mapping to check for duplicates
+    mapping(bytes32 => bool) public commitments;
+    
     /**
-     * @dev Constructor to initialize the Merkle tree
+     * @dev Constructor initializes the Merkle tree
      * @param _levels Height of the Merkle tree
      */
     constructor(uint32 _levels) {
-        require(_levels > 0, "Levels should be greater than 0");
-        require(_levels <= 32, "Levels should be less than or equal to 32");
+        require(_levels > 0, "Merkle tree height should be greater than 0");
+        require(_levels <= 32, "Merkle tree height should be less than or equal to 32");
         
         levels = _levels;
         
-        // Initialize zeros and filled subtrees
-        bytes32 currentZero = bytes32(0);
-        zeros.push(currentZero);
-        filledSubtrees.push(currentZero);
-        
-        for (uint32 i = 1; i < _levels; i++) {
+        // Initialize the Merkle tree with zeros
+        bytes32 currentZero = zeros(_levels);
+        for (uint32 i = 0; i < _levels; i++) {
+            filledSubtrees[i] = currentZero;
             currentZero = hashLeftRight(currentZero, currentZero);
-            zeros.push(currentZero);
-            filledSubtrees.push(currentZero);
         }
         
-        // Initialize the first root
-        roots[0] = hashLeftRight(currentZero, currentZero);
+        roots[0] = currentZero;
     }
     
     /**
@@ -67,58 +63,77 @@ contract MerkleTreeWithHistory is IMerkleTreeWithHistory {
     }
     
     /**
+     * @dev Get the zero value for a specific level
+     * @param _i Level index
+     * @return Zero value for the level
+     */
+    function zeros(uint256 _i) public pure returns (bytes32) {
+        if (_i == 0) return bytes32(0);
+        else if (_i == 1) return hashLeftRight(bytes32(0), bytes32(0));
+        else if (_i == 2) return hashLeftRight(hashLeftRight(bytes32(0), bytes32(0)), hashLeftRight(bytes32(0), bytes32(0)));
+        else if (_i == 3) return hashLeftRight(
+            hashLeftRight(hashLeftRight(bytes32(0), bytes32(0)), hashLeftRight(bytes32(0), bytes32(0))),
+            hashLeftRight(hashLeftRight(bytes32(0), bytes32(0)), hashLeftRight(bytes32(0), bytes32(0)))
+        );
+        else revert("Index out of bounds");
+    }
+    
+    /**
      * @dev Insert a new leaf into the Merkle tree
      * @param _leaf Leaf to insert
      * @return Index of the inserted leaf
      */
-    function insert(bytes32 _leaf) external override returns (uint256) {
+    function _insert(bytes32 _leaf) internal returns (uint32) {
+        require(!commitments[_leaf], "The commitment has been submitted");
         uint32 currentIndex = nextLeafIndex;
         require(currentIndex != uint32(2)**levels, "Merkle tree is full");
         
-        uint32 currentLevelIndex = currentIndex;
+        // Mark the commitment as used
+        commitments[_leaf] = true;
+        
+        // Start from the leaf and update the tree
         bytes32 currentLevelHash = _leaf;
         bytes32 left;
         bytes32 right;
         
-        // Update the tree
         for (uint32 i = 0; i < levels; i++) {
-            if (currentLevelIndex % 2 == 0) {
-                // If current index is even, update the filled subtree at this level
+            // If current index is even (left child)
+            if (currentIndex % 2 == 0) {
                 left = currentLevelHash;
-                right = zeros[i];
+                right = zeros(i);
                 filledSubtrees[i] = currentLevelHash;
             } else {
-                // If current index is odd, hash with the filled subtree
+                // If current index is odd (right child)
                 left = filledSubtrees[i];
                 right = currentLevelHash;
             }
             
             currentLevelHash = hashLeftRight(left, right);
-            currentLevelIndex /= 2;
+            currentIndex /= 2;
         }
         
         // Update the root history
-        currentRootIndex = (currentRootIndex + 1) % MERKLE_TREE_HISTORY_SIZE;
+        currentRootIndex = (currentRootIndex + 1) % ROOT_HISTORY_SIZE;
         roots[currentRootIndex] = currentLevelHash;
-        nextLeafIndex = currentIndex + 1;
+        nextLeafIndex++;
         
-        return currentIndex;
+        return nextLeafIndex - 1;
     }
     
     /**
-     * @dev Get the current root of the Merkle tree
-     * @return Current root
+     * @dev Get the current Merkle root
+     * @return Current root hash
      */
-    function getLastRoot() external view override returns (bytes32) {
+    function getLastRoot() external view returns (bytes32) {
         return roots[currentRootIndex];
     }
     
     /**
-     * @dev Check if a root exists in the history
+     * @dev Check if a given root exists in history
      * @param _root Root to check
      * @return True if the root exists
      */
-    function isKnownRoot(bytes32 _root) external view override returns (bool) {
+    function isKnownRoot(bytes32 _root) public view returns (bool) {
         if (_root == 0) {
             return false;
         }
@@ -131,7 +146,7 @@ contract MerkleTreeWithHistory is IMerkleTreeWithHistory {
             }
             
             if (i == 0) {
-                i = MERKLE_TREE_HISTORY_SIZE;
+                i = ROOT_HISTORY_SIZE;
             }
             i--;
         } while (i != currentRootIndex);

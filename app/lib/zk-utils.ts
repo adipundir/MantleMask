@@ -1,11 +1,13 @@
 /**
  * Zero-knowledge utility functions for MantleMask
  * Handles cryptographic operations for private transactions
+ * Inspired by Tornado Cash implementation
  */
 
 import { ethers } from "ethers";
 // Import circomlibjs for poseidon hash function
 import circomlibjs from "circomlibjs";
+import { ZK_CONFIG } from "@/lib/config";
 
 // Global reference to poseidon function
 let poseidonFn: any = null;
@@ -31,9 +33,10 @@ export async function initPoseidon() {
 
 /**
  * Generate a random field element for use as a secret or nullifier
+ * Ensures the generated value is within the snark field size
  */
 function generateRandomFieldElement(): string {
-  // Generate a random 31-byte value
+  // Generate a random 31-byte value (to ensure it's less than the snark field size)
   const randomBytes = new Uint8Array(31);
   crypto.getRandomValues(randomBytes);
   
@@ -41,6 +44,10 @@ function generateRandomFieldElement(): string {
   let randomBigInt = BigInt("0x" + Array.from(randomBytes)
     .map(b => b.toString(16).padStart(2, "0"))
     .join(""));
+  
+  // Ensure it's less than the field size
+  const fieldSize = BigInt(ZK_CONFIG.fieldSize);
+  randomBigInt = randomBigInt % fieldSize;
   
   // Return as a decimal string
   return randomBigInt.toString();
@@ -69,6 +76,32 @@ function poseidonHash(left: string, right: string): string {
 }
 
 /**
+ * Generate a commitment from nullifier and secret
+ * @param nullifier The nullifier value
+ * @param secret The secret value
+ * @returns Commitment hash as a decimal string
+ */
+function generateCommitment(nullifier: string, secret: string): string {
+  return poseidonHash(nullifier, secret);
+}
+
+/**
+ * Calculate the nullifier hash from a nullifier
+ * This prevents double spending while maintaining privacy
+ * @param nullifier The nullifier value
+ * @returns Nullifier hash as a decimal string
+ */
+export function calculateNullifierHash(nullifier: string): string {
+  if (!poseidonFn) {
+    throw new Error("Poseidon not initialized. Call initPoseidon() first.");
+  }
+  
+  // In Tornado Cash, the nullifier hash is a hash of the nullifier
+  // This prevents linking the nullifier hash to the commitment
+  return poseidonHash(nullifier, "1");
+}
+
+/**
  * Generate a note for depositing
  * @param amount Amount being deposited in MNT
  * @returns Object containing note data and string representation
@@ -79,6 +112,8 @@ export async function generateNote(amount: string): Promise<{
   secret: string;
   commitment: string;
   noteString: string;
+  commitmentHex: string;
+  nullifierHash: string;
 }> {
   // Ensure poseidon is initialized
   await initPoseidon();
@@ -88,17 +123,25 @@ export async function generateNote(amount: string): Promise<{
   const secret = generateRandomFieldElement();
   
   // Compute the commitment = poseidon(nullifier, secret)
-  const commitment = poseidonHash(nullifier, secret);
+  const commitment = generateCommitment(nullifier, secret);
+  
+  // Compute the nullifier hash = poseidon(nullifier, 1)
+  const nullifierHash = calculateNullifierHash(nullifier);
   
   // Create the note string format: mantle_<amount>_<nullifier>_<secret>
   const noteString = `mantle_${amount}_${nullifier}_${secret}`;
+  
+  // Convert commitment to hex for contract interaction
+  const commitmentHex = toBytes32(commitment);
   
   return {
     amount,
     nullifier,
     secret,
     commitment,
-    noteString
+    noteString,
+    commitmentHex,
+    nullifierHash
   };
 }
 
@@ -113,10 +156,13 @@ export function parseNote(noteString: string): {
   secret: string;
   commitment: string;
   noteString: string;
+  commitmentHex: string;
+  nullifierHash: string;
 } | null {
   // Check if poseidon is initialized
   if (!poseidonFn) {
     console.warn("Poseidon not initialized. Some functions may not work correctly.");
+    return null;
   }
   
   // Validate and parse the note string
@@ -141,46 +187,86 @@ export function parseNote(noteString: string): {
   }
   
   // Compute the commitment
-  let commitment = "";
-  if (poseidonFn) {
-    commitment = poseidonHash(nullifier, secret);
-  } else {
-    // If poseidon not initialized, use a placeholder
-    // This is not secure and should only be used for UI validation
-    commitment = "0";
-  }
+  const commitment = generateCommitment(nullifier, secret);
+  
+  // Compute the nullifier hash
+  const nullifierHash = calculateNullifierHash(nullifier);
+  
+  // Convert commitment to hex for contract interaction
+  const commitmentHex = toBytes32(commitment);
   
   return {
     amount,
     nullifier,
     secret,
     commitment,
-    noteString
+    noteString,
+    commitmentHex,
+    nullifierHash
+  };
+}
+
+/**
+ * Convert a decimal string to a bytes32 hex string for contract interaction
+ * @param decimalStr The decimal string to convert
+ * @returns Bytes32 hex string (0x prefixed, padded to 64 hex chars)
+ */
+export function toBytes32(decimalStr: string): string {
+  const bigInt = BigInt(decimalStr);
+  return "0x" + bigInt.toString(16).padStart(64, '0');
+}
+
+/**
+ * Convert a bytes32 hex string to a decimal string
+ * @param hexStr The hex string to convert (0x prefixed)
+ * @returns Decimal string
+ */
+export function fromBytes32(hexStr: string): string {
+  return BigInt(hexStr).toString();
+}
+
+/**
+ * Generate a Merkle proof for a commitment
+ * This is a simplified implementation - in production, this would reconstruct
+ * the Merkle tree from events and generate a real proof
+ * @param commitment The commitment to generate a proof for
+ * @returns Merkle proof data
+ */
+export async function generateMerkleProof(commitment: string): Promise<{
+  pathElements: string[];
+  pathIndices: number[];
+  root: string;
+}> {
+  // This is a mock implementation
+  // In a real application, this would:
+  // 1. Fetch all deposit events from the contract
+  // 2. Reconstruct the Merkle tree
+  // 3. Find the leaf index for our commitment
+  // 4. Generate a Merkle proof
+  
+  return {
+    pathElements: ["0x0", "0x0", "0x0", "0x0"],
+    pathIndices: [0, 0, 0, 0],
+    root: "0x0000000000000000000000000000000000000000000000000000000000000000"
   };
 }
 
 /**
  * Generate a proof for withdrawal
  * This is a placeholder - in a real implementation, this would use a ZK prover
- * @param amount Amount of the note
  * @param nullifier Nullifier from the note
  * @param secret Secret from the note
  * @param merkleProof Merkle proof of inclusion
  * @returns Simulated proof data
  */
-export async function generateProof(
-  amount: string,
+export async function generateWithdrawProof(
   nullifier: string,
   secret: string,
   merkleProof: any
 ): Promise<{
   proof: string;
-  publicSignals: {
-    root: string;
-    nullifierHash: string;
-    recipient: string;
-    denomination: string;
-  };
+  root: string;
+  nullifierHash: string;
 }> {
   // Ensure poseidon is initialized
   await initPoseidon();
@@ -188,29 +274,12 @@ export async function generateProof(
   // This is a mock implementation
   // In a real application, this would use a ZK circuit to generate a proof
   
-  // Mock nullifier hash (in a real implementation, this would be a hash of the nullifier)
-  const nullifierHash = poseidonHash(nullifier, "1");
+  // Calculate the nullifier hash
+  const nullifierHash = calculateNullifierHash(nullifier);
   
   return {
     proof: "0x00", // Mock proof
-    publicSignals: {
-      root: "0x00", // Mock root
-      nullifierHash,
-      recipient: ethers.ZeroAddress,
-      denomination: ethers.parseEther(amount).toString()
-    }
+    root: merkleProof.root,
+    nullifierHash
   };
-}
-
-/**
- * Calculate the nullifier hash from a nullifier
- * @param nullifier The nullifier value
- * @returns Nullifier hash as a string
- */
-export function calculateNullifierHash(nullifier: string): string {
-  if (!poseidonFn) {
-    throw new Error("Poseidon not initialized. Call initPoseidon() first.");
-  }
-  
-  return poseidonHash(nullifier, "1");
 } 
