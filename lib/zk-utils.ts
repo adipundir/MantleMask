@@ -1,21 +1,3 @@
-/**
- * Zero-Knowledge Utilities for MantleMask
- * 
- * Industry-standard implementation for ZK commitment schemes
- * This follows best practices used in production privacy applications
- * Compatible with Tornado Cash's circuits for maximum security
- * 
- * IMPORTANT HASH FUNCTION COMPATIBILITY NOTE:
- * - Frontend uses Poseidon hash for commitments (this file)
- * - Smart contracts use MiMCSponge hash for the Merkle tree
- * This dual-hash approach is the same as used by Tornado Cash
- * 
- * NOTE: Actual proof generation requires compiled circuit files from Tornado Cash:
- * - withdraw.wasm
- * - withdraw_proving_key.bin
- * These files need to be obtained separately and placed in a directory accessible by this code.
- */
-
 import { buildPoseidon } from "circomlibjs";
 // @ts-ignore - snarkjs doesn't have TypeScript types
 import * as snarkjs from "snarkjs";
@@ -88,8 +70,7 @@ interface NoteComponents {
  * Generate a note with proper cryptographic commitments
  * This is the core function for creating ZK deposit notes
  * 
- * IMPORTANT: This uses Poseidon hash for the commitment, which is compatible
- * with Tornado Cash's circuit expectations
+ * IMPORTANT: This uses Poseidon hash for the commitment
  */
 export async function generateNote(amount: string): Promise<NoteComponents & { commitmentHex: string }> {
   try {
@@ -202,8 +183,6 @@ export function calculateNullifierHash(nullifier: string): string {
     
     const nullifierBigInt = BigInt(nullifier);
     
-    // Tornado Cash circuit expects nullifierHash to be Poseidon(nullifier)
-    // The secret is not used in this hash to prevent linking
     const hash = poseidonHasher([nullifierBigInt]);
     return poseidonHasher.F.toString(hash);
   } catch (error) {

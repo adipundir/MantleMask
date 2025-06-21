@@ -1,5 +1,6 @@
 const snarkjs = require("snarkjs");
 const fs = require("fs");
+const path = require("path");
 
 /**
  * Verify a zkSNARK proof for the MantleMask privacy protocol
@@ -68,13 +69,16 @@ async function batchVerifyProofs(proofDataArray) {
 // Example verification if called directly
 async function example() {
     try {
-        // Load a test proof if available
-        if (fs.existsSync("./build/proof.json")) {
-            const proofData = JSON.parse(fs.readFileSync("./build/proof.json"));
-            await verifyWithdrawalProof(proofData);
-        } else {
-            console.log("No test proof found. Generate a proof first with: npm run generate-proof");
+        // Load a generated proof if available
+        const proofPath = path.join(__dirname, "../proofs/proof.json");
+        
+        if (!fs.existsSync(proofPath)) {
+            console.log("No proof found. Generate a proof first with: npm run generate-proof");
+            return;
         }
+        
+        const proofData = JSON.parse(fs.readFileSync(proofPath));
+        await verifyWithdrawalProof(proofData);
     } catch (error) {
         console.error("Example verification failed:", error.message);
     }

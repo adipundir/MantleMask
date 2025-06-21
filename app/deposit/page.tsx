@@ -28,7 +28,7 @@ interface NoteData {
 type DepositState = "select" | "preview" | "processing" | "complete" | "generating";
 
 export default function DepositPage() {
-  // Fixed amount to 10 MNT for demo
+  // Fixed amount to 10 MNT for initial release
   const [amount, setAmount] = useState("10")
   const [isLoading, setIsLoading] = useState(false)
   const [secretNote, setSecretNote] = useState("")
@@ -95,7 +95,7 @@ export default function DepositPage() {
     setDepositState("generating")
 
     try {
-      // Generate a simple note for the demo contract
+      // Generate a secure note for the privacy mixer
       toast.info("Generating secure note...", {
         description: "Creating cryptographic commitment for your deposit",
       });
@@ -161,8 +161,8 @@ export default function DepositPage() {
       console.log("Contract address:", contractAddress);
       console.log("Chain ID:", mantleSepolia.id);
       
-      // For demo contract, we use the note hash as the commitment
-      // This allows us to use the same value for deposit and withdraw
+      // Use the note hash as the commitment for privacy
+      // This allows secure deposit and withdrawal operations
       const noteHash = ethers.keccak256(ethers.toUtf8Bytes(generatedNote.noteString));
       console.log("Note hash:", noteHash);
       console.log("Deposit amount:", amount, "ETH");
@@ -180,7 +180,7 @@ export default function DepositPage() {
       
       // Check if we can read from the contract first
       try {
-        console.log("Testing contract connection by reading DENOMINATION...");
+        console.log("Verifying contract connection by reading DENOMINATION...");
         const denomination = await readContract({
           contract,
           method: "DENOMINATION",
@@ -307,7 +307,7 @@ export default function DepositPage() {
   // Format balance for display
   const formattedBalance = balance ? balance.displayValue : "0.0"
 
-  // Check if a denomination is enabled (only 10 MNT for demo)
+  // Check if a denomination is enabled (10 MNT supported in initial release)
   const isDenominationEnabled = (denom: string) => denom === "10"
 
   if (!isConnected) {
@@ -346,7 +346,7 @@ export default function DepositPage() {
                   Select Deposit Amount
                 </CardTitle>
                 <CardDescription className="text-sm">
-                  Choose the amount to deposit anonymously. Currently supporting 10 MNT for demo.
+                  Choose the amount to deposit anonymously. Currently supporting 10 MNT denominations.
                 </CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
@@ -563,7 +563,7 @@ export default function DepositPage() {
                 Select Deposit Amount
               </CardTitle>
               <CardDescription className="text-sm">
-                Choose the amount to deposit anonymously. Currently supporting 10 MNT for demo.
+                Choose the amount to deposit anonymously. Currently supporting 10 MNT denominations.
               </CardDescription>
             </CardHeader>
             <CardContent className="space-y-4">

@@ -97,7 +97,7 @@ export const ZK_CONFIG = {
   }
 };
 
-// Contract ABIs - updated for demo contract
+// Contract ABIs - MantleMask privacy mixer
 export const CONTRACT_ABIS = {
   mantleMask: [
     {

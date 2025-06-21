@@ -136,7 +136,7 @@ npm run setup
 
 ### Testing
 ```bash
-# Generate and verify a test proof
+# Generate and verify a proof
 npm run generate-proof
 npm run verify-proof
 ```

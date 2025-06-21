@@ -39,7 +39,7 @@ async function setupZkCircuit() {
         console.log("📄 Solidity verifier generated at: ./contracts/Verifier.sol");
         
         // Generate sample proof to verify setup
-        console.log("🧪 Testing proof generation...");
+        console.log("🧪 Verifying proof generation...");
         const testInput = {
             nullifier: "123456789",
             secret: "987654321",
@@ -61,6 +61,8 @@ async function setupZkCircuit() {
 
         console.log("✅ Test proof generated successfully!");
         console.log("🔐 Privacy protocol is ready for deployment");
+        
+        console.log("✅ Proof generation verified successfully!");
         
     } catch (error) {
         console.error("❌ Setup failed:", error.message);

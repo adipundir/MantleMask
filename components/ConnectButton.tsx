@@ -73,6 +73,7 @@ function ConnectWalletButton() {
       wallets={wallets}
       connectModal={{ size: "wide" }}
       theme="dark"
+      chain={mantleSepolia}
     />
   );
 }
