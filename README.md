@@ -1,134 +1,182 @@
-# MantleMask
+# MantleMask - zkSNARK Privacy Mixer
 
-MantleMask is a privacy solution for Mantle Network that enables anonymous transfers of MNT tokens using zero-knowledge proofs. Inspired by Tornado Cash, it allows users to break the on-chain link between source and destination addresses.
+A privacy-preserving cryptocurrency mixer using zero-knowledge proofs on the Mantle Network.
 
-## Proof of Concept
-
-This is a proof of concept implementation that currently supports only 10 MNT denomination. The full version would support multiple denominations (10, 100, 500, 1000 MNT).
-
-## How It Works
-
-1. **Deposit**: A user deposits 10 MNT and receives a secret note
-2. **Wait**: For better anonymity, wait for other users to make deposits
-3. **Withdraw**: Using a different wallet, the user can withdraw the same amount using their secret note
-4. **Privacy**: The on-chain link between the deposit and withdrawal addresses is broken
-
-## Features
-
-- **Zero-Knowledge Proofs**: Uses zero-knowledge proofs to validate withdrawals without revealing the link to deposits
-- **Fixed Denomination**: Currently supports 10 MNT denomination for the proof of concept
-- **Incremental Merkle Tree**: Efficient on-chain Merkle tree implementation
-- **Poseidon Hash**: ZK-friendly hash function for commitments and nullifiers
-- **Modern UI**: Clean and intuitive user interface
-
-## Architecture
-
-### Smart Contracts
-
-- **MerkleTreeWithHistory.sol**: Implements an incremental Merkle tree with historical roots
-- **MantleMask.sol**: Main contract handling deposits and withdrawals
-- **Verifier.sol**: Verifies zero-knowledge proofs
-- **PoseidonT3.sol**: Library for the Poseidon hash function
-
-### Frontend
-
-- Built with Next.js and React
-- Uses ThirdWeb for wallet connections and contract interactions
-- Implements client-side cryptography for note generation and proof verification
-
-## Getting Started
+## 🚀 Quick Start Guide
 
 ### Prerequisites
+- Node.js (v16+)
+- npm or yarn
+- Circom compiler
 
-- Node.js and npm
-- A wallet with MNT on Mantle Sepolia testnet
-
-### Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/yourusername/mantlemask.git
-cd mantlemask
-```
-
-2. Install dependencies:
+### Step 1: Install Dependencies
 ```bash
 npm install
+
+# Install Circom globally
+npm install -g circom
 ```
 
-3. Set up environment variables:
-```bash
-cp .env.example .env.local
-# Edit .env.local with your configuration
-```
-
-4. Start the development server:
-```bash
-npm run dev
-```
-
-### Deployment
-
-See [DeploymentGuide.md](./contracts/DeploymentGuide.md) for detailed instructions on deploying the contracts.
-
-## Usage
-
-### Making a Deposit
-
-1. Connect your wallet
-2. Ensure you have at least 10 MNT
-3. Click "Deposit" and confirm the transaction
-4. Save the generated note securely
-
-### Making a Withdrawal
-
-1. Connect a different wallet
-2. Go to the Withdraw page
-3. Enter your note
-4. Click "Withdraw" and confirm the transaction
-
-## Future Enhancements
-
-- Support for multiple denominations (100, 500, 1000 MNT)
-- Integration with relayers to enhance privacy
-- Real zero-knowledge circuit implementation
-- Support for ERC-20 tokens
-
-## Security Considerations
-
-- **Note Security**: Your note is the only way to withdraw funds - keep it secure
-- **Timing**: For better anonymity, wait some time between deposit and withdrawal
-- **Gas**: Use a wallet with enough MNT for gas when withdrawing
-
-## Development
-
-### Running Tests
-
-```bash
-# Smart contract tests
-cd contracts
-npx hardhat test
-
-# Frontend tests
-npm test
-```
-
-### Building for Production
-
+### Step 2: Compile Circuit
 ```bash
 npm run build
 ```
+This generates:
+- `build/withdraw.wasm` - WebAssembly for proof generation
+- `build/withdraw.r1cs` - R1CS constraint system
 
-## Contributing
+### Step 3: Setup Trusted Setup
+```bash
+npm run setup
+```
+This:
+- Downloads Powers of Tau ceremony file
+- Generates proving key (`withdraw_final.zkey`)
+- Generates verification key (`verification_key.json`)
+- Creates Solidity verifier (`contracts/Verifier.sol`)
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+### Step 4: Generate Proof
+```bash
+npm run generate-proof
+```
+Creates a zkSNARK proof in `build/proof.json`
 
-## License
+### Step 5: Verify Proof
+```bash
+npm run verify-proof
+```
+Verifies the generated proof off-chain
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+## 🔧 Usage
 
-## Acknowledgments
+### 1. Deploy Contracts
+```solidity
+// Deploy MantleMask
+MantleMask mixer = new MantleMask(1 ether, 20);
+```
 
-- Inspired by [Tornado Cash](https://tornado.cash/)
-- Uses [circomlibjs](https://github.com/iden3/circomlibjs) for cryptographic operations
-- Built on [Mantle Network](https://www.mantle.xyz/)
+### 2. Make Deposit
+```javascript
+const { generateCommitment } = require('./scripts/generateProof');
+
+const nullifier = "123456789";
+const secret = "987654321";
+const { commitment } = generateCommitment(nullifier, secret);
+
+// Deposit on-chain
+await mixer.deposit(commitment, { value: ethers.utils.parseEther("1") });
+```
+
+### 3. Generate Withdrawal Proof
+```javascript
+const { generateProof } = require('./scripts/generateProof');
+
+const proof = await generateProof(
+    nullifier,
+    secret,
+    recipientAddress
+);
+```
+
+### 4. Withdraw
+```javascript
+// Use the generated proof to withdraw
+await mixer.withdraw(
+    proof.proof,           // zkSNARK proof
+    proof.publicSignals[0], // Merkle root  
+    proof.nullifierHash,   // Nullifier hash
+    recipientAddress       // Recipient
+);
+```
+
+## 📁 File Structure
+
+```
+├── circuits/
+│   ├── withdraw.circom      # Main withdrawal circuit
+│   └── merkleTree.circom    # Merkle tree verification
+├── contracts/
+│   ├── MantleMask.sol       # Main privacy mixer contract
+│   └── Verifier.sol         # Generated zkSNARK verifier
+├── scripts/
+│   ├── setup.js             # Trusted setup generation
+│   ├── generateProof.js     # Proof generation
+│   └── verifyProof.js       # Proof verification
+└── build/                   # Generated files
+    ├── withdraw.wasm
+    ├── withdraw.r1cs
+    ├── withdraw_final.zkey
+    ├── verification_key.json
+    └── proof.json
+```
+
+## 🔐 How It Works
+
+### Circuit Logic
+1. **Input Validation**: Verifies knowledge of nullifier and secret
+2. **Commitment Generation**: `commitment = Poseidon(nullifier, secret)`
+3. **Nullifier Hash**: `nullifierHash = Poseidon(nullifier)`
+4. **Merkle Proof**: Proves commitment is in the deposit tree
+5. **Output**: Generates zkSNARK proof without revealing secrets
+
+### Privacy Guarantees
+- ✅ **Anonymity**: No link between deposit and withdrawal addresses
+- ✅ **Untraceability**: Nullifier and secret never revealed
+- ✅ **Double-spend Protection**: Nullifier hash prevents reuse
+- ✅ **Merkle Tree Inclusion**: Proves legitimate deposit
+
+## 🛠️ Development
+
+### Circuit Modification
+Edit `circuits/withdraw.circom` and recompile:
+```bash
+npm run build
+npm run setup
+```
+
+### Testing
+```bash
+# Generate and verify a test proof
+npm run generate-proof
+npm run verify-proof
+```
+
+## 🚨 Security Notes
+
+⚠️ **For Production Use:**
+- Use a proper Powers of Tau ceremony
+- Implement ceremony verification
+- Add circuit auditing
+- Use hardware for key generation
+
+## 📊 Circuit Constraints
+
+- **Total Constraints**: ~2,500 (for 20-level Merkle tree)
+- **Public Inputs**: 3 (root, nullifierHash, recipient)
+- **Private Inputs**: 42 (nullifier, secret, pathElements[20], pathIndices[20])
+
+## 🎯 Integration Example
+
+```javascript
+// Complete workflow example
+const MantleMask = require('./scripts/generateProof');
+
+async function privateTransfer() {
+    // 1. Generate secrets
+    const nullifier = Math.random().toString();
+    const secret = Math.random().toString();
+    
+    // 2. Create commitment and deposit
+    const { commitment } = MantleMask.generateCommitment(nullifier, secret);
+    await mixer.deposit(commitment, { value: ethers.utils.parseEther("1") });
+    
+    // 3. Generate proof and withdraw
+    const proof = await MantleMask.generateProof(nullifier, secret, recipient);
+    await mixer.withdraw(proof.proof, proof.publicSignals[0], proof.nullifierHash, recipient);
+    
+    console.log("✅ Private transfer complete!");
+}
+```
+
+## 📄 License
+MIT License

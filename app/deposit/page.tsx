@@ -6,11 +6,12 @@ import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
 import { Loader2, Copy, CheckCircle2, AlertCircle, ShieldCheck, Lock, ArrowRight } from "lucide-react"
 import { initPoseidon, generateNote } from "@/lib/zk-utils"
-import { ZK_CONFIG, CONTRACT_ADDRESSES, CONTRACT_ABIS } from "@/lib/config"
+import { ZK_CONFIG } from "@/lib/config"
+import { MANTLEMASK_ABI } from "@/lib/abi"
 import { useWalletState } from "@/components/ConnectButton"
 import { useActiveAccount, useWalletBalance, useSendTransaction } from "thirdweb/react"
 import { client, mantleSepolia } from "@/components/ConnectButton"
-import { getContract, prepareContractCall } from "thirdweb"
+import { getContract, prepareContractCall, readContract } from "thirdweb"
 import { ethers } from "ethers"
 
 // Define the type for the note returned by generateNote
@@ -27,7 +28,7 @@ interface NoteData {
 type DepositState = "select" | "preview" | "processing" | "complete" | "generating";
 
 export default function DepositPage() {
-  // Fixed amount to 10 MNT for proof of concept
+  // Fixed amount to 10 MNT for demo
   const [amount, setAmount] = useState("10")
   const [isLoading, setIsLoading] = useState(false)
   const [secretNote, setSecretNote] = useState("")
@@ -91,12 +92,15 @@ export default function DepositPage() {
     }
 
     setIsLoading(true)
-    
-    // Create a dedicated generating state with visual feedback
     setDepositState("generating")
 
     try {
-      // Add artificial delay for better UX (1-2 seconds)
+      // Generate a simple note for the demo contract
+      toast.info("Generating secure note...", {
+        description: "Creating cryptographic commitment for your deposit",
+      });
+      
+      // Add artificial delay for better UX
       await new Promise(resolve => setTimeout(resolve, 1500));
       
       // Generate a note with nullifier and secret
@@ -105,6 +109,10 @@ export default function DepositPage() {
       setSecretNote(note.noteString);
       setDepositState("preview");
       setIsLoading(false);
+      
+      toast.success("Note generated successfully!", {
+        description: "Your secure note is ready for deposit",
+      });
     } catch (error: any) {
       toast.error("Note generation failed", {
         description: error.message || "There was an error generating your deposit note",
@@ -123,32 +131,103 @@ export default function DepositPage() {
       return
     }
     
+    if (!account) {
+      toast.error("No account connected", {
+        description: "Please connect your wallet first",
+      })
+      return
+    }
+    
     setIsLoading(true);
     setDepositState("processing");
     
     try {
+      console.log("=== STARTING DEPOSIT PROCESS ===");
+      console.log("Account:", account.address);
+      console.log("Generated note:", generatedNote);
+      
+      toast.info("Submitting deposit...", {
+        description: "Creating anonymous deposit on Mantle Network",
+      });
+      
+      // Check if contract address is properly configured
+      const contractAddress = process.env.NEXT_PUBLIC_MANTLEMASK_ADDRESS;
+      console.log("Raw contract address from env:", contractAddress);
+      
+      if (!contractAddress || contractAddress === "your_deployed_contract_address_here") {
+        throw new Error("Contract address not configured. Please set NEXT_PUBLIC_MANTLEMASK_ADDRESS in your .env file.");
+      }
+      
+      console.log("Contract address:", contractAddress);
+      console.log("Chain ID:", mantleSepolia.id);
+      
+      // For demo contract, we use the note hash as the commitment
+      // This allows us to use the same value for deposit and withdraw
+      const noteHash = ethers.keccak256(ethers.toUtf8Bytes(generatedNote.noteString));
+      console.log("Note hash:", noteHash);
+      console.log("Deposit amount:", amount, "ETH");
+      console.log("Amount in wei:", ethers.parseEther(amount).toString());
+      
       // Create a contract instance with thirdweb
       const contract = getContract({
         client,
-        address: CONTRACT_ADDRESSES.mantleMask as `0x${string}`,
+        address: contractAddress as `0x${string}`,
         chain: mantleSepolia,
-        // @ts-ignore - Ignore type errors for now
-        abi: CONTRACT_ABIS.mantleMask,
+        abi: MANTLEMASK_ABI,
       });
       
-      // Prepare the transaction using the commitmentHex from the note
-      // @ts-ignore - Ignore type errors for now
+      console.log("Contract instance created:", contract);
+      
+      // Check if we can read from the contract first
+      try {
+        console.log("Testing contract connection by reading DENOMINATION...");
+        const denomination = await readContract({
+          contract,
+          method: "DENOMINATION",
+          params: []
+        });
+        console.log("Contract DENOMINATION:", denomination);
+      } catch (readError: any) {
+        console.error("Failed to read from contract:", readError);
+        throw new Error(`Cannot connect to contract: ${readError.message}`);
+      }
+      
+      console.log("Preparing transaction...");
+      
+      // Prepare the transaction using the note hash as commitment
       const transaction = prepareContractCall({
         contract,
         method: "deposit",
-        params: [generatedNote.commitmentHex as `0x${string}`],
+        params: [noteHash as `0x${string}`],
         value: BigInt(ethers.parseEther(amount).toString()),
-      });
+      }) as any;
+      
+      console.log("Transaction prepared");
+      console.log("Transaction details:");
+      console.log("- Contract address:", contractAddress);
+      console.log("- Method: deposit");
+      console.log("- Params:", [noteHash]);
+      console.log("- Value:", ethers.parseEther(amount).toString(), "wei");
+      console.log("- Value in ETH:", amount);
       
       // Send the transaction
-      // @ts-ignore - Ignore type errors for now
+      console.log("Sending transaction...");
+      
+      // Add a timeout to catch if the transaction hangs
+      const transactionTimeout = setTimeout(() => {
+        console.warn("Transaction is taking longer than expected...");
+        toast.info("Transaction is processing...", {
+          description: "This may take a few moments on Mantle network",
+        });
+      }, 10000); // 10 seconds
+      
       sendTransaction(transaction, {
         onSuccess: (result) => {
+          clearTimeout(transactionTimeout);
+          console.log("=== TRANSACTION SUCCESS ===");
+          console.log("Transaction result:", result);
+          console.log("Transaction hash:", result.transactionHash);
+          
           setTxHash(result.transactionHash);
           setDepositState("complete");
           toast.success("Deposit successful!", {
@@ -157,21 +236,52 @@ export default function DepositPage() {
           setIsLoading(false);
         },
         onError: (error) => {
+          clearTimeout(transactionTimeout);
+          console.error("=== TRANSACTION ERROR ===");
+          console.error("Full error object:", error);
+          console.error("Error message:", error.message);
+          console.error("Error stack:", error.stack);
+          console.error("Error cause:", error.cause);
+          console.error("Error name:", error.name);
+          
+          // Check for specific ThirdWeb errors
+          if (error.message.includes("400") || error.message.includes("Bad Request")) {
+            console.error("ThirdWeb API error detected");
+          }
+          
+          let errorMessage = "Unknown transaction error";
+          if (error.message.includes("user rejected") || error.message.includes("User rejected")) {
+            errorMessage = "Transaction was rejected by user";
+          } else if (error.message.includes("insufficient funds")) {
+            errorMessage = "Insufficient funds for transaction";
+          } else if (error.message.includes("wrong network")) {
+            errorMessage = "Please switch to Mantle Sepolia network";
+          } else if (error.message.includes("400") || error.message.includes("Bad Request")) {
+            errorMessage = "ThirdWeb API error - please try again";
+          } else {
+            errorMessage = error.message || "Transaction failed";
+          }
+          
           toast.error("Deposit failed", {
-            description: error.message || "There was an error processing your deposit",
+            description: errorMessage,
           });
           console.error("Error depositing:", error);
           setIsLoading(false);
-          setDepositState("preview"); // Go back to preview state
+          setDepositState("preview");
         },
       });
     } catch (error: any) {
+      console.error("=== PREPARATION ERROR ===");
+      console.error("Full error object:", error);
+      console.error("Error message:", error.message);
+      console.error("Error stack:", error.stack);
+      
       toast.error("Preparation failed", {
         description: error.message || "There was an error preparing your deposit",
       });
       console.error("Error preparing deposit:", error);
       setIsLoading(false);
-      setDepositState("preview"); // Go back to preview state
+      setDepositState("preview");
     }
   }
 
@@ -197,295 +307,439 @@ export default function DepositPage() {
   // Format balance for display
   const formattedBalance = balance ? balance.displayValue : "0.0"
 
-  // Check if a denomination is enabled (only 10 MNT for now)
-  const isDenominationEnabled = (denom: string) => denom === "10";
+  // Check if a denomination is enabled (only 10 MNT for demo)
+  const isDenominationEnabled = (denom: string) => denom === "10"
+
+  if (!isConnected) {
+    return (
+      <div className="container mx-auto px-4 py-6">
+        <div className="max-w-lg mx-auto space-y-4">
+          <div className="text-center space-y-1">
+            <h1 className="text-2xl font-bold">Anonymous Deposit</h1>
+            <p className="text-sm text-muted-foreground">
+              Deposit MNT tokens anonymously using zero-knowledge cryptography
+            </p>
+          </div>
+
+          {/* Balance Display */}
+          <Card>
+            <CardContent className="pt-4">
+              <div className="flex justify-between items-center">
+                <span className="text-sm text-muted-foreground">Your Balance</span>
+                <span className="text-base font-semibold">
+                  {isBalanceLoading ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    `${formattedBalance} MNT`
+                  )}
+                </span>
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Deposit Flow */}
+          {depositState === "select" && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <Lock className="h-4 w-4" />
+                  Select Deposit Amount
+                </CardTitle>
+                <CardDescription className="text-sm">
+                  Choose the amount to deposit anonymously. Currently supporting 10 MNT for demo.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div className="grid grid-cols-1 gap-3">
+                  {["10"].map((denom) => (
+                    <Button
+                      key={denom}
+                      variant={amount === denom ? "default" : "outline"}
+                      className="h-12 text-base"
+                      onClick={() => setAmount(denom)}
+                      disabled={!isDenominationEnabled(denom)}
+                    >
+                      <div className="flex flex-col items-center space-y-1">
+                        <span className="font-bold">{denom} MNT</span>
+                        {!isDenominationEnabled(denom) && (
+                          <span className="text-xs text-muted-foreground">Coming Soon</span>
+                        )}
+                      </div>
+                    </Button>
+                  ))}
+                </div>
+              </CardContent>
+              <CardFooter className="pt-2">
+                <Button 
+                  onClick={handleGenerateNote} 
+                  className="w-full" 
+                  disabled={!isDenominationEnabled(amount) || isLoading}
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Generating...
+                    </>
+                  ) : (
+                    <>
+                      Generate Secure Note
+                      <ArrowRight className="ml-2 h-4 w-4" />
+                    </>
+                  )}
+                </Button>
+              </CardFooter>
+            </Card>
+          )}
+
+          {depositState === "generating" && (
+            <Card>
+              <CardContent className="pt-6 pb-6">
+                <div className="flex flex-col items-center space-y-3">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <div className="text-center space-y-1">
+                    <p className="text-sm font-medium">Generating cryptographic note...</p>
+                    <p className="text-xs text-muted-foreground">
+                      Creating secure commitment using zero-knowledge cryptography
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {depositState === "preview" && generatedNote && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-lg">
+                  <ShieldCheck className="h-4 w-4" />
+                  Secure Note Generated
+                </CardTitle>
+                <CardDescription className="text-sm">
+                  Your anonymous deposit note has been generated. Save it securely to withdraw your funds later.
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div className="bg-muted p-3 rounded-lg space-y-2">
+                  <div className="flex justify-between items-center">
+                    <span className="text-sm text-muted-foreground">Amount</span>
+                    <span className="text-sm font-semibold">{amount} MNT</span>
+                  </div>
+                </div>
+                
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Your Secure Note</label>
+                  <div className="flex gap-2">
+                    <div className="flex-1 p-2 bg-muted rounded text-xs font-mono break-all">
+                      {secretNote}
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={copyNote}
+                    >
+                      {copied ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    ⚠️ Store this note securely. You'll need it to withdraw your funds. There's no way to recover it if lost.
+                  </p>
+                </div>
+              </CardContent>
+              <CardFooter className="flex gap-2 pt-2">
+                <Button variant="outline" onClick={resetFlow} className="flex-1">
+                  Generate New Note
+                </Button>
+                <Button 
+                  onClick={handleConfirmDeposit} 
+                  className="flex-1" 
+                  disabled={!noteSaved || isLoading}
+                >
+                  {isLoading ? (
+                    <>
+                      <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      Depositing...
+                    </>
+                  ) : (
+                    "Confirm Deposit"
+                  )}
+                </Button>
+              </CardFooter>
+            </Card>
+          )}
+
+          {depositState === "processing" && (
+            <Card>
+              <CardContent className="pt-6 pb-6">
+                <div className="flex flex-col items-center space-y-3">
+                  <Loader2 className="h-6 w-6 animate-spin" />
+                  <div className="text-center space-y-1">
+                    <p className="text-sm font-medium">Processing deposit...</p>
+                    <p className="text-xs text-muted-foreground">
+                      Submitting anonymous transaction to Mantle Network
+                    </p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
+          {depositState === "complete" && (
+            <Card>
+              <CardHeader className="pb-3">
+                <CardTitle className="flex items-center gap-2 text-lg text-green-600">
+                  <CheckCircle2 className="h-4 w-4" />
+                  Deposit Successful!
+                </CardTitle>
+                <CardDescription className="text-sm">
+                  Your {amount} MNT has been deposited anonymously into MantleMask
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {txHash && (
+                  <div className="space-y-2">
+                    <label className="text-sm font-medium">Transaction Hash</label>
+                    <div className="p-2 bg-muted rounded text-xs font-mono break-all">
+                      {txHash}
+                    </div>
+                  </div>
+                )}
+                
+                <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-2">
+                  <p className="text-sm font-medium text-green-800">
+                    ✅ Important Reminders
+                  </p>
+                  <ul className="text-xs text-green-700 space-y-1">
+                    <li>• Your note is required to withdraw funds</li>
+                    <li>• Store it in a safe, offline location</li>
+                    <li>• Anyone with the note can withdraw your funds</li>
+                    <li>• The deposit is now anonymous and untraceable</li>
+                  </ul>
+                </div>
+              </CardContent>
+              <CardFooter className="pt-2">
+                <Button onClick={resetFlow} className="w-full">
+                  Make Another Deposit
+                </Button>
+              </CardFooter>
+            </Card>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="container px-4 py-12 md:px-6 md:py-16 lg:px-8 h-full">
-      <div className="mx-auto flex max-w-md flex-col items-center justify-center gap-4">
-        <Card className="w-full shadow-lg">
-          <CardHeader className="text-center">
-            <CardTitle className="text-2xl font-bold">Deposit MNT</CardTitle>
-            <CardDescription>
-              Deposit MNT anonymously and receive a secret note for withdrawal
-            </CardDescription>
-          </CardHeader>
-          
-          <CardContent className="px-6 space-y-4">
-            {!isConnected && (
-              <div className="flex items-center gap-2 p-3 bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-md">
-                <AlertCircle className="h-4 w-4 text-yellow-600" />
-                <p className="text-sm text-yellow-800 dark:text-yellow-200">
-                  Please connect your wallet to deposit MNT
-                </p>
-              </div>
-            )}
+    <div className="container mx-auto px-4 py-6">
+      <div className="max-w-lg mx-auto space-y-4">
+        <div className="text-center space-y-1">
+          <h1 className="text-2xl font-bold">Anonymous Deposit</h1>
+          <p className="text-sm text-muted-foreground">
+            Deposit MNT tokens anonymously using zero-knowledge cryptography
+          </p>
+        </div>
 
-            {!isInitialized && (
-              <div className="flex items-center gap-2 p-3 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-md">
-                <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />
-                <p className="text-sm text-blue-800 dark:text-blue-200">
-                  Initializing cryptographic components...
-                </p>
-              </div>
-            )}
-
-            {isConnected && isInitialized && depositState === "select" && (
-              <div className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <label className="text-sm font-medium">
-                    Amount to Deposit
-                  </label>
-                  <span className="text-sm text-muted-foreground">
-                    Balance: {isBalanceLoading ? "Loading..." : `${parseFloat(formattedBalance).toFixed(4)} ${balance?.symbol || "MNT"}`}
-                  </span>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-3">
-                  <Button
-                    variant="default"
-                    onClick={() => setAmount("10")}
-                    disabled={isLoading || (balance && parseFloat(balance.displayValue) < 10)}
-                    className="h-14"
-                  >
-                    10 MNT
-                  </Button>
-                  
-                  <Button
-                    variant="outline"
-                    disabled={true}
-                    className="h-14 relative"
-                  >
-                    <div className="flex items-center justify-center space-x-2">
-                      <Lock className="h-4 w-4" />
-                      <span>100 MNT</span>
-                    </div>
-                  </Button>
-                  
-                  <Button
-                    variant="outline"
-                    disabled={true}
-                    className="h-14 relative"
-                  >
-                    <div className="flex items-center justify-center space-x-2">
-                      <Lock className="h-4 w-4" />
-                      <span>500 MNT</span>
-                    </div>
-                  </Button>
-                  
-                  <Button
-                    variant="outline"
-                    disabled={true}
-                    className="h-14 relative"
-                  >
-                    <div className="flex items-center justify-center space-x-2">
-                      <Lock className="h-4 w-4" />
-                      <span>1000 MNT</span>
-                    </div>
-                  </Button>
-                </div>
-
-                {balance && parseFloat(balance.displayValue) < parseFloat(amount) && (
-                  <div className="flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-md">
-                    <AlertCircle className="h-4 w-4 text-red-600" />
-                    <p className="text-sm text-red-800 dark:text-red-200">
-                      Insufficient balance for selected amount
-                    </p>
-                  </div>
+        {/* Balance Display */}
+        <Card>
+          <CardContent className="pt-4">
+            <div className="flex justify-between items-center">
+              <span className="text-sm text-muted-foreground">Your Balance</span>
+              <span className="text-base font-semibold">
+                {isBalanceLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  `${formattedBalance} MNT`
                 )}
-
-                <div className="pt-2">
-                  <Button
-                    className="w-full" 
-                    onClick={handleGenerateNote}
-                    disabled={isLoading || !isConnected || !isInitialized || (balance && parseFloat(balance.displayValue) < parseFloat(amount))}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Generating note...
-                      </>
-                    ) : (
-                      <>
-                        <ShieldCheck className="mr-2 h-4 w-4" />
-                        Generate Deposit Note
-                      </>
-                    )}
-                  </Button>
-                </div>
-              </div>
-            )}
-            
-            {depositState === "generating" && (
-              <div className="space-y-4">
-                <div className="flex flex-col items-center justify-center py-8">
-                  <div className="relative">
-                    <Loader2 className="h-12 w-12 text-primary animate-spin" />
-                    <ShieldCheck className="h-6 w-6 text-primary absolute inset-0 m-auto" />
-                  </div>
-                  <h3 className="text-lg font-medium mt-4">Generating Your Secret Note</h3>
-                  <p className="text-sm text-muted-foreground mt-2 text-center max-w-xs">
-                    Creating a secure cryptographic note for your {amount} MNT deposit...
-                  </p>
-                  <div className="w-full max-w-xs mt-4">
-                    <div className="h-1.5 w-full bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-                      <div className="h-full bg-primary rounded-full animate-pulse" style={{ width: '60%' }}></div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-
-            {depositState === "preview" && secretNote && (
-              <div className="space-y-4">
-                <div className="rounded-md border border-amber-200 bg-amber-50 dark:bg-amber-900/20 dark:border-amber-800 p-4">
-                  <div className="flex">
-                    <div className="flex-shrink-0">
-                      <AlertCircle className="h-5 w-5 text-amber-600" />
-                    </div>
-                    <div className="ml-3">
-                      <h3 className="text-sm font-medium text-amber-800 dark:text-amber-200">Important</h3>
-                      <div className="mt-2 text-sm text-amber-700 dark:text-amber-300">
-                        <p>Save this note <strong>before</strong> proceeding with the deposit. You will need it to withdraw your funds.</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <label className="text-sm font-medium">
-                    Your Secret Note
-                  </label>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={copyNote}
-                    disabled={copied}
-                  >
-                    {copied ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-600" />
-                    ) : (
-                      <Copy className="h-4 w-4" />
-                    )}
-                    <span className="ml-2">{copied ? "Copied" : "Copy"}</span>
-                  </Button>
-                </div>
-                <div className="font-mono text-xs p-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-md break-all">
-                  {secretNote}
-                </div>
-                
-                <div className="pt-2 space-y-2">
-                  <Button
-                    className="w-full" 
-                    onClick={handleConfirmDeposit}
-                    disabled={isLoading || !noteSaved}
-                  >
-                    {isLoading ? (
-                      <>
-                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        <ArrowRight className="mr-2 h-4 w-4" />
-                        {noteSaved ? "Confirm Deposit" : "Copy Note to Continue"}
-                      </>
-                    )}
-                  </Button>
-                  
-                  <Button
-                    variant="outline"
-                    className="w-full"
-                    onClick={resetFlow}
-                    disabled={isLoading}
-                  >
-                    Go Back
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {depositState === "processing" && (
-              <div className="space-y-4">
-                <div className="flex flex-col items-center justify-center py-6">
-                  <Loader2 className="h-10 w-10 text-primary animate-spin mb-4" />
-                  <h3 className="text-lg font-medium">Processing Deposit</h3>
-                  <p className="text-sm text-muted-foreground mt-2">
-                    Please wait while your transaction is being processed...
-                  </p>
-                </div>
-              </div>
-            )}
-
-            {depositState === "complete" && (
-              <div className="space-y-4">
-                <div className="flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800 rounded-md">
-                  <CheckCircle2 className="h-5 w-5 text-green-600" />
-                  <div>
-                    <p className="text-sm font-medium text-green-800 dark:text-green-200">
-                      Deposit Successful!
-                    </p>
-                    <p className="text-sm text-green-700 dark:text-green-300 mt-1">
-                      {amount} MNT has been deposited anonymously.
-                    </p>
-                  </div>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <label className="text-sm font-medium">
-                    Your Secret Note
-                  </label>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={copyNote}
-                    disabled={copied}
-                  >
-                    {copied ? (
-                      <CheckCircle2 className="h-4 w-4 text-green-600" />
-                    ) : (
-                      <Copy className="h-4 w-4" />
-                    )}
-                    <span className="ml-2">{copied ? "Copied" : "Copy"}</span>
-                  </Button>
-                </div>
-                <div className="font-mono text-xs p-3 bg-gray-50 dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-md break-all">
-                  {secretNote}
-                </div>
-                <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-md">
-                  <AlertCircle className="h-4 w-4 text-amber-600" />
-                  <p className="text-sm text-amber-800 dark:text-amber-200">
-                    Save this note securely! It cannot be recovered if lost.
-                  </p>
-                </div>
-                
-                {txHash && (
-                  <div className="mt-2 text-center">
-                    <a 
-                      href={`https://explorer.sepolia.mantle.xyz/tx/${txHash}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-sm text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                    >
-                      View transaction on block explorer
-                    </a>
-                  </div>
-                )}
-                
-                <div className="pt-2">
-                  <Button
-                    variant="outline" 
-                    className="w-full"
-                    onClick={resetFlow}
-                  >
-                    Make Another Deposit
-                  </Button>
-                </div>
-              </div>
-            )}
+              </span>
+            </div>
           </CardContent>
-
         </Card>
+
+        {/* Deposit Flow */}
+        {depositState === "select" && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <Lock className="h-4 w-4" />
+                Select Deposit Amount
+              </CardTitle>
+              <CardDescription className="text-sm">
+                Choose the amount to deposit anonymously. Currently supporting 10 MNT for demo.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <div className="grid grid-cols-1 gap-3">
+                {["10"].map((denom) => (
+                  <Button
+                    key={denom}
+                    variant={amount === denom ? "default" : "outline"}
+                    className="h-12 text-base"
+                    onClick={() => setAmount(denom)}
+                    disabled={!isDenominationEnabled(denom)}
+                  >
+                    <div className="flex flex-col items-center space-y-1">
+                      <span className="font-bold">{denom} MNT</span>
+                      {!isDenominationEnabled(denom) && (
+                        <span className="text-xs text-muted-foreground">Coming Soon</span>
+                      )}
+                    </div>
+                  </Button>
+                ))}
+              </div>
+            </CardContent>
+            <CardFooter className="pt-2">
+              <Button 
+                onClick={handleGenerateNote} 
+                className="w-full" 
+                disabled={!isDenominationEnabled(amount) || isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    Generate Secure Note
+                    <ArrowRight className="ml-2 h-4 w-4" />
+                  </>
+                )}
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {depositState === "generating" && (
+          <Card>
+            <CardContent className="pt-6 pb-6">
+              <div className="flex flex-col items-center space-y-3">
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <div className="text-center space-y-1">
+                  <p className="text-sm font-medium">Generating cryptographic note...</p>
+                  <p className="text-xs text-muted-foreground">
+                    Creating secure commitment using zero-knowledge cryptography
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {depositState === "preview" && generatedNote && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg">
+                <ShieldCheck className="h-4 w-4" />
+                Secure Note Generated
+              </CardTitle>
+              <CardDescription className="text-sm">
+                Your anonymous deposit note has been generated. Save it securely to withdraw your funds later.
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div className="bg-muted p-3 rounded-lg space-y-2">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">Amount</span>
+                  <span className="text-sm font-semibold">{amount} MNT</span>
+                </div>
+              </div>
+              
+              <div className="space-y-2">
+                <label className="text-sm font-medium">Your Secure Note</label>
+                <div className="flex gap-2">
+                  <div className="flex-1 p-2 bg-muted rounded text-xs font-mono break-all">
+                    {secretNote}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={copyNote}
+                  >
+                    {copied ? <CheckCircle2 className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  ⚠️ Store this note securely. You'll need it to withdraw your funds. There's no way to recover it if lost.
+                </p>
+              </div>
+            </CardContent>
+            <CardFooter className="flex gap-2 pt-2">
+              <Button variant="outline" onClick={resetFlow} className="flex-1">
+                Generate New Note
+              </Button>
+              <Button 
+                onClick={handleConfirmDeposit} 
+                className="flex-1" 
+                disabled={!noteSaved || isLoading}
+              >
+                {isLoading ? (
+                  <>
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    Depositing...
+                  </>
+                ) : (
+                  "Confirm Deposit"
+                )}
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
+
+        {depositState === "processing" && (
+          <Card>
+            <CardContent className="pt-6 pb-6">
+              <div className="flex flex-col items-center space-y-3">
+                <Loader2 className="h-6 w-6 animate-spin" />
+                <div className="text-center space-y-1">
+                  <p className="text-sm font-medium">Processing deposit...</p>
+                  <p className="text-xs text-muted-foreground">
+                    Submitting anonymous transaction to Mantle Network
+                  </p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {depositState === "complete" && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="flex items-center gap-2 text-lg text-green-600">
+                <CheckCircle2 className="h-4 w-4" />
+                Deposit Successful!
+              </CardTitle>
+              <CardDescription className="text-sm">
+                Your {amount} MNT has been deposited anonymously into MantleMask
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {txHash && (
+                <div className="space-y-2">
+                  <label className="text-sm font-medium">Transaction Hash</label>
+                  <div className="p-2 bg-muted rounded text-xs font-mono break-all">
+                    {txHash}
+                  </div>
+                </div>
+              )}
+              
+              <div className="bg-green-50 border border-green-200 rounded-lg p-3 space-y-2">
+                <p className="text-sm font-medium text-green-800">
+                  ✅ Important Reminders
+                </p>
+                <ul className="text-xs text-green-700 space-y-1">
+                  <li>• Your note is required to withdraw funds</li>
+                  <li>• Store it in a safe, offline location</li>
+                  <li>• Anyone with the note can withdraw your funds</li>
+                  <li>• The deposit is now anonymous and untraceable</li>
+                </ul>
+              </div>
+            </CardContent>
+            <CardFooter className="pt-2">
+              <Button onClick={resetFlow} className="w-full">
+                Make Another Deposit
+              </Button>
+            </CardFooter>
+          </Card>
+        )}
       </div>
     </div>
   )

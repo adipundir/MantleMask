@@ -10,7 +10,7 @@ import { defineChain } from "thirdweb/chains";
 
 export const mantleSepolia = defineChain({
   id: 5003,
-  name: "Mantle Sepolia",
+  name: "Mantle Sepolia Testnet",
   rpc: "https://rpc.sepolia.mantle.xyz",
   nativeCurrency: {
     name: "Mantle Sepolia MNT",
@@ -72,10 +72,6 @@ function ConnectWalletButton() {
       client={client}
       wallets={wallets}
       connectModal={{ size: "wide" }}
-      accountAbstraction={{
-        chain: mantleSepolia,
-        sponsorGas: true,
-      }}
       theme="dark"
     />
   );
