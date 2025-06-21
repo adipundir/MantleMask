@@ -1,6 +1,3 @@
-import { buildPoseidon } from "circomlibjs";
-// @ts-ignore - snarkjs doesn't have TypeScript types
-import * as snarkjs from "snarkjs";
 import { HASH_CONFIG, NOTE_PREFIX, CIRCUIT_CONFIG } from "./config";
 
 // Type definitions for better code clarity
@@ -16,6 +13,18 @@ const SNARK_FIELD_SIZE = HASH_CONFIG.FIELD_SIZE;
 
 // Singleton pattern for Poseidon hasher
 let poseidonHasher: any = null;
+let snarkjs: any = null;
+
+/**
+ * Dynamic import for snarkjs to reduce bundle size
+ */
+async function loadSnarkjs() {
+  if (!snarkjs) {
+    // @ts-ignore - snarkjs doesn't have TypeScript types
+    snarkjs = await import("snarkjs");
+  }
+  return snarkjs;
+}
 
 /**
  * Initialize the Poseidon hasher (this needs to be called before any hashing)
@@ -23,6 +32,8 @@ let poseidonHasher: any = null;
 export async function initPoseidon(): Promise<void> {
   if (!poseidonHasher) {
     try {
+      // Dynamic import to reduce bundle size
+      const { buildPoseidon } = await import("circomlibjs");
       poseidonHasher = await buildPoseidon();
     } catch (error) {
       console.error("Failed to initialize Poseidon:", error);
@@ -354,8 +365,9 @@ export async function generateWithdrawalProof(
     });
 
     try {
-      // Generate the proof using snarkjs and Tornado Cash's circuit
-      const { proof, publicSignals } = await snarkjs.groth16.fullProve(
+      // Load snarkjs dynamically and generate the proof using Tornado Cash's circuit
+      const snarkjsLib = await loadSnarkjs();
+      const { proof, publicSignals } = await snarkjsLib.groth16.fullProve(
         input,
         circuitFilePaths.wasmFile,
         circuitFilePaths.provingKeyFile
