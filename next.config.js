@@ -15,8 +15,9 @@ const nextConfig = {
       };
       
       // Add buffer to providePlugin
+      const webpack = require('webpack');
       config.plugins.push(
-        new (require('webpack')).ProvidePlugin({
+        new webpack.ProvidePlugin({
           Buffer: ['buffer', 'Buffer'],
         })
       );
